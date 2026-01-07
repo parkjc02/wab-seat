@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PLC 접점 검색기</title>
+    <style>
+        /* 모바일 최적화 스타일 */
+        body { font-family: 'Malgun Gothic', sans-serif; padding: 10px; background-color: #f4f4f4; margin: 0; }
+        .container { max-width: 100%; margin: auto; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        
+        h2 { text-align: center; font-size: 1.2rem; color: #333; margin-bottom: 15px; }
+        
+        /* 필터 버튼 스타일 */
+        .filter-group {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 10px;
+        }
+        .filter-btn {
+            flex: 1;
+            padding: 10px 5px;
+            border: 1px solid #007bff;
+            background-color: white;
+            color: #007bff;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            outline: none;
+        }
+        .filter-btn.active {
+            background-color: #007bff;
+            color: white;
+        }
+
+        /* 입력창 스타일 */
+        #searchInput { 
+            width: 100%; 
+            padding: 12px; 
+            margin-bottom: 10px; 
+            border: 2px solid #007bff; 
+            border-radius: 8px; 
+            font-size: 18px; 
+            box-sizing: border-box;
+            outline: none;
+        }
+
+        .count-info { font-size: 0.8em; color: #666; margin-bottom: 8px; text-align: right; }
+
+        /* 테이블 스타일 */
+        .table-wrapper { overflow-x: auto; max-height: 70vh; border: 1px solid #ddd; border-radius: 4px; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 8px; border: 1px solid #ddd; text-align: left; word-break: break-all; }
+        th { background-color: #007bff; color: white; position: sticky; top: 0; z-index: 10; }
+        
+        td:first-child { width: 25%; font-weight: bold; background-color: #fcfcfc; }
+        .rtb-cell { color: #d9534f; font-weight: bold; font-size: 12px; }
+        
+        .no-result { text-align: center; padding: 30px; color: #888; display: none; }
+        .bottom-spacer { height: 50px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🛠 PLC 검색 (X, Y, M, L)</h2>
+    
+    <div class="filter-group">
+        <button id="btn-ALL" class="filter-btn active" onclick="setFilter('ALL')">전체</button>
+        <button id="btn-X" class="filter-btn" onclick="setFilter('X')">X접점</button>
+        <button id="btn-Y" class="filter-btn" onclick="setFilter('Y')">Y접점</button>
+        <button id="btn-ML" class="filter-btn" onclick="setFilter('ML')">M/L코일</button>
+    </div>
+
+    <div id="countInfo" class="count-info">로드 중...</div>
+    <input type="text" id="searchInput" placeholder="공정명 또는 숫자 입력..." onkeyup="search()" inputmode="search">
+    
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>접점</th>
+                    <th>코멘트</th>
+                    <th>RTB</th>
+                </tr>
+            </thead>
+            <tbody id="resultBody"></tbody>
+        </table>
+        <div id="noData" class="no-result">🔍 결과가 없습니다.</div>
+    </div>
+    <div class="bottom-spacer"></div>
+</div>
+
+<script src="data_x.js"></script>
+<script src="data_y.js"></script>
+<script src="data_m.js"></script>
+<script src="data_l.js"></script>
+
+<script>
+    let allDevices = [];
+    let currentFilter = 'ALL'; // 현재 선택된 필터 상태
+
+    window.onload = function() {
+        try {
+            allDevices = [
+                ...(typeof devicesx !== 'undefined' ? devicesx : []),
+                ...(typeof devicesy !== 'undefined' ? devicesy : []),
+                ...(typeof devicesm !== 'undefined' ? devicesm : []),
+                ...(typeof devicesl !== 'undefined' ? devicesl : [])
+            ];
+            
+            // 16진수 기준 오름차순 정렬
+            allDevices.sort((a, b) => {
+                const getSortKey = (str) => {
+                    const match = str.match(/^([A-Z]+)([0-9A-F]+)/i);
+                    if (!match) return str;
+                    const prefix = match[1].toUpperCase();
+                    const hexValue = parseInt(match[2], 16);
+                    const order = { 'X': 1, 'Y': 2, 'M': 3, 'L': 4 };
+                    return (order[prefix] || 9) + hexValue.toString(16).padStart(8, '0');
+                };
+                return getSortKey(a.device).localeCompare(getSortKey(b.device));
+            });
+
+            document.getElementById('countInfo').innerText = `총 ${allDevices.length.toLocaleString()}개 로드됨`;
+            document.getElementById('searchInput').focus();
+            search(); 
+        } catch (e) {
+            console.error("데이터 로딩 오류:", e);
+        }
+    };
+
+    // 2. 필터 버튼 클릭 시 실행되는 함수
+    function setFilter(type) {
+        currentFilter = type;
+        
+        // 버튼 활성화 스타일 관리
+        const btns = document.querySelectorAll('.filter-btn');
+        btns.forEach(btn => btn.classList.remove('active'));
+        document.getElementById('btn-' + type).classList.add('active');
+        
+        search(); // 필터 변경 후 즉시 검색 실행
+    }
+
+    function search() {
+        const input = document.getElementById('searchInput').value.trim().toUpperCase();
+        const searchTerms = input.split(' ').filter(term => term !== '');
+        
+        const tbody = document.getElementById('resultBody');
+        const noData = document.getElementById('noData');
+        
+        const fragment = document.createDocumentFragment();
+        tbody.innerHTML = '';
+
+        const filtered = allDevices.filter(item => {
+            const dev = (item.device || "").toUpperCase();
+            const com = (item.comment || "").toUpperCase();
+
+            // 상단 필터 버튼 규칙 적용
+            if (currentFilter === 'X' && !dev.startsWith('X')) return false;
+            if (currentFilter === 'Y' && !dev.startsWith('Y')) return false;
+            if (currentFilter === 'ML' && !(dev.startsWith('M') || dev.startsWith('L'))) return false;
+
+            // 검색어가 없으면 필터링 통과
+            if (searchTerms.length === 0) return true;
+
+            // 검색어 매칭 로직
+            return searchTerms.every(term => {
+                // 접점 기호(X, Y, M, L) 포함 시 접점에서 찾기
+                if (/[XYML]/.test(term)) {
+                    return dev.includes(term);
+                }
+                // 숫자만 있는 경우 코멘트에서 정확한 숫자 매칭
+                if (/^\d+$/.test(term)) {
+                    const regex = new RegExp(`(?<!\\d)${term}(?!\\d)`);
+                    return regex.test(com);
+                }
+                // 기타 텍스트는 코멘트 포함 여부 확인
+                return com.includes(term);
+            });
+        });
+
+        if (filtered.length > 0) {
+            noData.style.display = 'none';
+            filtered.slice(0, 300).forEach(item => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${item.device}</strong></td>
+                    <td>${item.comment}</td>
+                    <td class="rtb-cell">${item.rtb || '-'}</td>
+                `;
+                fragment.appendChild(tr);
+            });
+            tbody.appendChild(fragment);
+        } else {
+            noData.style.display = 'block';
+        }
+    }
+</script>
+</body>
+</html>
