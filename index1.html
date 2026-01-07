@@ -68,8 +68,70 @@
 <script src="data_y.js"></script>
 <script src="data_m.js"></script>
 <script src="data_l.js"></script>
+
 <script>
-    // ... (이전 답변의 search 함수 및 로딩 로직 그대로 유지) ...
+    let allDevices = [];
+
+    // 1. 페이지 로드 시 데이터 통합 및 초기화
+    window.onload = function() {
+        try {
+            // 소문자 변수명(devicesx, devicesy...)을 사용하는 경우에 맞춰 작성되었습니다.
+            allDevices = [
+                ...(typeof devicesx !== 'undefined' ? devicesx : []),
+                ...(typeof devicesy !== 'undefined' ? devicesy : []),
+                ...(typeof devicesm !== 'undefined' ? devicesm : []),
+                ...(typeof devicesl !== 'undefined' ? devicesl : [])
+            ];
+            
+            document.getElementById('countInfo').innerText = `총 ${allDevices.length.toLocaleString()}개 로드됨`;
+            
+            // 초기 포커스 및 전체 목록 출력
+            document.getElementById('searchInput').focus();
+            search(); 
+        } catch (e) {
+            console.error("데이터 로딩 오류:", e);
+        }
+    };
+
+    // 2. 검색 함수 (이 부분이 input의 onkeyup="search()"와 연결됩니다)
+    function search() {
+        const input = document.getElementById('searchInput').value.trim().toUpperCase();
+        const searchTerms = input.split(' ').filter(term => term !== ''); // 띄어쓰기로 단어 분리
+        
+        const tbody = document.getElementById('resultBody');
+        const noData = document.getElementById('noData');
+        
+        // 검색 결과 필터링
+        const filtered = allDevices.filter(item => {
+            const dev = (item.device || "").toUpperCase();
+            const com = (item.comment || "").toUpperCase();
+            const fullText = dev + " " + com;
+
+            // 모든 검색 단어가 포함되어 있는지 확인
+            return searchTerms.every(term => fullText.includes(term));
+        });
+
+        // 화면 그리기 최적화
+        const fragment = document.createDocumentFragment();
+        tbody.innerHTML = '';
+
+        if (filtered.length > 0) {
+            noData.style.display = 'none';
+            // 모바일 및 저사양 환경을 위해 상위 200개만 출력
+            filtered.slice(0, 200).forEach(item => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${item.device}</strong></td>
+                    <td>${item.comment}</td>
+                    <td class="rtb-cell">${item.rtb || '-'}</td>
+                `;
+                fragment.appendChild(tr);
+            });
+            tbody.appendChild(fragment);
+        } else {
+            noData.style.display = 'block';
+        }
+    }
 </script>
 </body>
 </html>
