@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PLC 접점 검색기</title>
+    <style>
+        body { font-family: 'Malgun Gothic', sans-serif; padding: 10px; background-color: #f4f4f4; margin: 0; }
+        .container { max-width: 100%; margin: auto; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); position: relative; }
+        
+        /* [추가] 우측 상단 로고 스타일 */
+        .top-logo {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            height: 40px; /* 크기는 적절히 조절하세요 */
+            width: 80px;
+        }
+
+        h2 { text-align: center; font-size: 1.2rem; color: #333; margin-bottom: 15px; margin-top: 5px; }
+        
+        /* 필터 버튼 */
+        .filter-group { display: flex; gap: 4px; margin-bottom: 10px; flex-wrap: wrap; }
+        .filter-btn { 
+            flex: 1; min-width: 65px; padding: 10px 2px; 
+            border: 1px solid #007bff; background-color: white; color: #007bff; 
+            border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px; outline: none; 
+        }
+        .filter-btn.active { background-color: #007bff; color: white; }
+
+        /* 검색창 영역 */
+        .search-container { position: relative; width: 100%; margin-bottom: 10px; }
+        #searchInput { 
+            width: 100%; padding: 12px 40px 12px 12px; 
+            border: 2px solid #007bff; border-radius: 8px; font-size: 18px; 
+            box-sizing: border-box; outline: none; 
+        }
+        .clear-btn { 
+            position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+            background: #ccc; color: white; width: 24px; height: 24px; 
+            border-radius: 50%; text-align: center; line-height: 22px; 
+            cursor: pointer; font-size: 16px; font-weight: bold; display: none; user-select: none;
+        }
+
+        .count-info { font-size: 0.8em; color: #666; margin-bottom: 8px; text-align: right; font-weight: bold; }
+
+        /* 테이블 영역 */
+        .table-wrapper { overflow-x: auto; max-height: 65vh; border: 1px solid #ddd; border-radius: 4px; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { padding: 10px 8px; border: 1px solid #ddd; text-align: left; word-break: break-all; }
+        th { background-color: #007bff; color: white; position: sticky; top: 0; z-index: 10; }
+        td:first-child { width: 25%; font-weight: bold; background-color: #fcfcfc; }
+        .rtb-cell { color: #d9534f; font-weight: bold; font-size: 12px; }
+        
+        .no-result { text-align: center; padding: 30px; color: #888; display: none; }
+        .bottom-spacer { height: 50px; }
+
+        /* 최상단 이동 버튼 스타일 */
+        #topBtn {
+            position: fixed; bottom: 25px; right: 25px; z-index: 999;
+            width: 50px; height: 50px; background-color: #007bff;
+            color: white; border: none; border-radius: 50%;
+            font-size: 20px; font-weight: bold; cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            display: none; align-items: center; justify-content: center;
+            -webkit-appearance: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <img src="hyundai.png" alt="Hyundai Logo" class="top-logo">
+    
+    <h2>🛠 PLC 접점 검색기</h2>
+    
+    <div class="filter-group">
+        <button id="btn-ALL" class="filter-btn active" onclick="setFilter('ALL')">전체</button>
+        <button id="btn-주요접점" class="filter-btn" onclick="setFilter('주요접점')">주요접점</button>
+        <button id="btn-X" class="filter-btn" onclick="setFilter('X')">X접점</button>
+        <button id="btn-Y" class="filter-btn" onclick="setFilter('Y')">Y접점</button>
+        <button id="btn-ML" class="filter-btn" onclick="setFilter('ML')">M/L코일</button>
+    </div>
+
+    <div id="countInfo" class="count-info">데이터 로딩 중...</div>
+
+    <div class="search-container">
+        <input type="text" id="searchInput" placeholder="검색어 입력 (예: 리프트, 92)" onkeyup="handleSearch(this)" inputmode="search">
+        <div id="clearBtn" class="clear-btn" onclick="clearSearch()">×</div>
+    </div>
+    
+    <div id="scrollTarget" class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>접점</th><th>코멘트</th><th>RTB</th></tr>
+            </thead>
+            <tbody id="resultBody"></tbody>
+        </table>
+        <div id="noData" class="no-result">🔍 결과가 없습니다.</div>
+    </div>
+    <div class="bottom-spacer"></div>
+</div>
+
+<button id="topBtn" onclick="scrollToTop()">▲</button>
+
+<script src="data_main.js"></script>
+<script src="data_x.js"></script>
+<script src="data_y.js"></script>
+<script src="data_m.js"></script>
+<script src="data_l.js"></script>
+
+<script>
+    let allDevices = [];
+    let currentFilter = 'ALL';
+
+    const aliasMap = {
+        "리프트": "LIFT", "LIFT": "리프트",
+        "스토퍼": "STOPPER", "STOPPER": "스토퍼",
+        "실린더": "CYLINDER", "CYLINDER": "실린더",
+        "센서": "SENSOR", "SENSOR": "센서",
+        "모터": "MOTOR", "MOTOR": "모터",
+        "디버터":"DIVERTER", "DIVERTER":"디버터",
+        "메인":"MAIN", "MAIN":"메인",
+        "인버터":"INVERTER", "INVERTER":"인버터",
+        "컨베어":"C/V", "C/V":"컨베어"
+    };
+
+    window.onload = function() {
+        try {
+            const dMain = (typeof devicesmain !== 'undefined') ? devicesmain : 
+                          (typeof devicesMain !== 'undefined' ? devicesMain : []);
+            const dx = (typeof devicesx !== 'undefined') ? devicesx : (typeof devicesX !== 'undefined' ? devicesX : []);
+            const dy = (typeof devicesy !== 'undefined') ? devicesy : (typeof devicesY !== 'undefined' ? devicesY : []);
+            const dm = (typeof devicesm !== 'undefined') ? devicesm : (typeof devicesM !== 'undefined' ? devicesM : []);
+            const dl = (typeof devicesl !== 'undefined') ? devicesl : (typeof devicesL !== 'undefined' ? devicesL : []);
+
+            allDevices = [...dMain, ...dx, ...dy, ...dm, ...dl];
+
+            document.getElementById('countInfo').innerText = 
+                `주요:${dMain.length} X:${dx.length} Y:${dy.length} M/L:${dm.length + dl.length}`;
+            
+            search(); 
+
+            document.getElementById('scrollTarget').addEventListener('scroll', checkScroll);
+            window.addEventListener('scroll', checkScroll);
+
+        } catch (e) {
+            console.error("데이터 로드 오류:", e);
+        }
+    };
+
+    function checkScroll() {
+        const btn = document.getElementById("topBtn");
+        const wrapper = document.getElementById('scrollTarget');
+        if (window.pageYOffset > 200 || wrapper.scrollTop > 200) {
+            btn.style.display = "flex";
+        } else {
+            btn.style.display = "none";
+        }
+    }
+
+    function scrollToTop() {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        document.getElementById('scrollTarget').scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function handleSearch(input) {
+        document.getElementById('clearBtn').style.display = input.value.length > 0 ? 'block' : 'none';
+        search();
+    }
+
+    function clearSearch() {
+        const input = document.getElementById('searchInput');
+        input.value = '';
+        document.getElementById('clearBtn').style.display = 'none';
+        input.focus();
+        search();
+    }
+
+    function setFilter(type) {
+        currentFilter = type;
+        document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+        document.getElementById('btn-' + type).classList.add('active');
+        search();
+    }
+
+    function search() {
+        const input = document.getElementById('searchInput').value.trim().toUpperCase();
+        const searchTerms = input.split(' ').filter(term => term !== '');
+        const tbody = document.getElementById('resultBody');
+        const noData = document.getElementById('noData');
+        tbody.innerHTML = '';
+
+        const filtered = allDevices.filter(item => {
+            const dev = (item.device || "").toUpperCase();
+            const com = (item.comment || "").toUpperCase();
+
+            if (currentFilter === '주요접점') {
+                if (!item.isMain) return false;
+            } else if (currentFilter === 'X') {
+                if (!dev.startsWith('X')) return false;
+            } else if (currentFilter === 'Y') {
+                if (!dev.startsWith('Y')) return false;
+            } else if (currentFilter === 'ML') {
+                if (!(dev.startsWith('M') || dev.startsWith('L'))) return false;
+            }
+
+            if (searchTerms.length === 0) return true;
+
+            return searchTerms.every(term => {
+                const alias = aliasMap[term] || "";
+                if (['X', 'Y', 'M', 'L'].some(sym => term.includes(sym))) return dev.includes(term);
+                if (/^\d+$/.test(term)) {
+                    const regex = new RegExp(`(?<!\\d)${term}(?!\\d)`);
+                    return regex.test(com);
+                }
+                return com.includes(term) || (alias && com.includes(alias)) || dev.includes(term);
+            });
+        });
+
+        if (filtered.length > 0) {
+            noData.style.display = 'none';
+            const fragment = document.createDocumentFragment();
+            filtered.slice(0, 500).forEach(item => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td><strong>${item.device}</strong></td><td>${item.comment}</td><td class="rtb-cell">${item.rtb || '-'}</td>`;
+                fragment.appendChild(tr);
+            });
+            tbody.appendChild(fragment);
+        } else {
+            noData.style.display = 'block';
+        }
+    }
+</script>
+</body>
+</html>
